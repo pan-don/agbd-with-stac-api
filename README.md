@@ -1,13 +1,31 @@
 <h1 align="center">AGBD Estimation with STAC API</h1>
 
+<p align="center">
+  <img src="assets/dataset_distribution.png" alt="Deskripsi gambar" width="800">
+</p>
+
 Estimasi *Aboveground Biomass Density* (AGBD, Mg/ha) berbasis citra satelit. Data diakses langsung melalui STAC API, diolah menjadi fitur spasial, lalu diprediksi dengan model Random Forest terlatih untuk menghasilkan peta AGBD beresolusi 30 m.
 
 ## Gambaran Proyek
 
-Proyek ini terdiri dari dua alur kerja:
+Proyek ini terdiri dari tiga alur kerja utama:
 
-1. **Pemodelan** (`agbd_modelling.ipynb`): melatih model Random Forest Regressor dengan target AGBD dari GEDI L4A dan fitur dari citra satelit, divalidasi dengan 10-fold cross validation, lalu disimpan sebagai `models/randomforest.pkl`.
-2. **Prediksi spasial** (`notebook.ipynb`): mengambil data satelit lewat STAC API, mengekstrak fitur, menjalankan model terlatih pada setiap piksel, dan menyimpan peta AGBD sebagai GeoTIFF.
+1. **Pembuatan Dataset** (`create_dataset.ipynb`):
+   - Mengambil citra satelit (Sentinel-2, Sentinel-1, GLO-30 DEM, Dynamic World) via STAC API dan footprint observasi GEDI L4A via NASA Earthdata.
+   - Melakukan reproyeksi ke grid 30 m (UTM), komposit temporal median, ekstraksi indeks vegetasi, tekstur GLCM, dan probabilitas tutupan lahan.
+   - Melakukan sampling nilai fitur raster pada setiap titik footprint GEDI valid dan mengekspor dataset tabular untuk training.
+   - **Lokasi Penyimpanan Dataset:** Hasil dataset training disimpan di `data/collections/dataset_gedi_valid.csv` (dapat disalin ke `data/table/dataset.csv`). File checkpoint raster sementara di `data/collections/` otomatis dibersihkan setelah dataset berhasil diekspor.
+2. **Pemodelan Machine Learning** (`modelling.ipynb`):
+   - Memuat dataset tabular (`data/table/dataset.csv` atau `data/collections/dataset_gedi_valid.csv`).
+   - Melakukan *Exploratory Data Analysis* (EDA), analisis korelasi fitur, dan visualisasi distribusi AGBD.
+   - Melatih model *Random Forest Regressor* dengan target AGBD dari GEDI L4A menggunakan 10-fold cross validation.
+   - Menyimpan model terlatih sebagai `models/randomforest.pkl`.
+3. **Prediksi Spasial & Inferensi** (`inference.ipynb`):
+   - Mengunduh data citra satelit untuk seluruh area studi (AOI) pada periode target via STAC API.
+   - Mengekstrak fitur raster *wall-to-wall* pada resolusi 30 m.
+   - Menjalankan inferensi pada setiap piksel menggunakan model terlatih (`models/randomforest.pkl`).
+   - Menerapkan *masking* non-vegetasi menggunakan probabilitas tutupan lahan Dynamic World.
+   - Menyimpan peta estimasi AGBD berformat GeoTIFF dan visualisasinya.
 
 ### Sumber Data
 
@@ -36,26 +54,29 @@ STAC API → Unduh & clip AOI → Fitur (S2, S1, DEM, DW) → Random Forest → 
 agbd-with-stac-api/
 ├── assets/                 # Gambar hasil visualisasi (peta AGBD)
 ├── data/
+│   ├── collections/        # Dataset training (dataset_gedi_valid.csv) & cache unduhan sementara
 │   ├── table/              # Dataset tabular untuk pelatihan (dataset.csv)
+│   ├── vector/             # Shapefile batas administrasi AOI (.shp, .shx, .dbf)
 │   ├── sentinel02/         # Hasil unduhan Sentinel-2 (GeoTIFF)
 │   ├── sentinel1/          # Hasil unduhan Sentinel-1 (GeoTIFF)
 │   ├── glo30/              # Hasil unduhan DEM GLO-30 (GeoTIFF)
 │   ├── gedil4a/            # Footprint GEDI L4A (CSV)
 │   ├── dynamic_world/      # Probabilitas tutupan lahan (GeoTIFF)
-│   ├── preprocessed/       # Cache fitur Sentinel-1
+│   ├── preprocessed/       # Cache fitur Sentinel-1 (.npz)
 │   └── inference/          # Peta AGBD hasil prediksi (GeoTIFF)
 ├── models/
 │   ├── randomforest.pkl    # Model Random Forest terlatih
 │   └── dynamicword/        # Model Dynamic World (TensorFlow SavedModel)
-├── agbd_modelling.ipynb    # Pelatihan dan evaluasi model
-├── notebook.ipynb          # Akuisisi data, preprocessing, dan inference
+├── create_dataset.ipynb    # Akuisisi data, ekstraksi fitur raster & pembuatan dataset tabular GEDI
+├── modelling.ipynb         # EDA, pelatihan, validasi silang, dan evaluasi model Random Forest
+├── inference.ipynb         # Inferensi spasial wall-to-wall pada AOI dan ekspor peta GeoTIFF
 ├── pyproject.toml          # Dependensi proyek
 ├── uv.lock                 # Versi dependensi terkunci
 ├── .python-version         # Versi Python
 └── README.md
 ```
 
-> Folder di dalam `data/` dibuat otomatis oleh notebook saat proses unduh dijalankan.
+> Folder di dalam `data/` dibuat otomatis oleh notebook saat proses unduh/ekstraksi dijalankan.
 
 ## Persiapan
 
@@ -76,10 +97,14 @@ PASSWORD_NASA=<password_earthdata>
 
 ## Cara Penggunaan
 
-1. Jalankan `agbd_modelling.ipynb` untuk melatih model dan menyimpan `models/randomforest.pkl` (lewati jika model sudah tersedia).
-2. Jalankan `notebook.ipynb` berurutan, dari konfigurasi AOI hingga penyimpanan peta di bagian *Save Map*.
+1. **Pembuatan Dataset (`create_dataset.ipynb`)**:
+   Jalankan untuk mengunduh citra satelit pada batas AOI, memfilter footprint GEDI yang valid, mengekstrak fitur spasial, dan menghasilkan dataset training di `data/collections/dataset_gedi_valid.csv`.
+2. **Pelatihan Model (`modelling.ipynb`)**:
+   Jalankan untuk menganalisis fitur, melatih model Random Forest Regressor menggunakan 10-fold cross validation, mengevaluasi performa (RMSE, MAE, R²), dan menyimpan model ke `models/randomforest.pkl`.
+3. **Prediksi Spasial & Pembuatan Peta (`inference.ipynb`)**:
+   Jalankan secara berurutan untuk mengekstrak fitur seluruh grid AOI pada periode target, menjalankan model Random Forest, menerapkan masking non-vegetasi, dan mengekspor peta AGBD ke `data/inference/`.
 
-Area studi, periode, dan resolusi dapat diubah pada bagian *Config* di `notebook.ipynb`.
+Area studi, periode, dan resolusi dapat disesuaikan pada bagian *Config* di masing-masing notebook.
 
 ## Teknologi
 
